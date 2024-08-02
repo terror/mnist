@@ -173,6 +173,7 @@ impl Network {
       .weight_input_hidden
       .multiply(input)
       .apply(sigmoid);
+
     self
       .config
       .weight_hidden_output
