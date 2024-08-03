@@ -1,4 +1,128 @@
-use {rand::prelude::*, std::ops::Add};
+use {
+  rand::prelude::*,
+  std::{
+    fs::File,
+    io::{self, Read},
+    ops::Add,
+    path::Path,
+    process,
+  },
+};
+
+type Result<T = (), E = anyhow::Error> = std::result::Result<T, E>;
+
+#[derive(Debug)]
+pub struct MnistData {
+  training_images: Vec<Matrix>,
+  training_labels: Vec<Matrix>,
+  test_images: Vec<Matrix>,
+  test_labels: Vec<Matrix>,
+}
+
+pub fn load_mnist(path: &str) -> Result<MnistData> {
+  let train_images_path = Path::new(path)
+    .join("train-images-idx3-ubyte")
+    .join("train-images-idx3-ubyte");
+
+  let train_labels_path = Path::new(path)
+    .join("train-labels-idx1-ubyte")
+    .join("train-labels-idx1-ubyte");
+
+  let test_images_path = Path::new(path)
+    .join("t10k-images-idx3-ubyte")
+    .join("t10k-images-idx3-ubyte");
+
+  let test_labels_path = Path::new(path)
+    .join("t10k-labels-idx1-ubyte")
+    .join("t10k-labels-idx1-ubyte");
+
+  Ok(MnistData {
+    training_images: read_images(train_images_path)?,
+    training_labels: read_labels(train_labels_path)?,
+    test_images: read_images(test_images_path)?,
+    test_labels: read_labels(test_labels_path)?,
+  })
+}
+
+fn read_images<P: AsRef<Path>>(path: P) -> io::Result<Vec<Matrix>> {
+  let mut file = File::open(path)?;
+  let mut buffer = [0u8; 4];
+
+  file.read_exact(&mut buffer)?;
+
+  let magic_number = u32::from_be_bytes(buffer);
+
+  if magic_number != 2051 {
+    return Err(io::Error::new(
+      io::ErrorKind::InvalidData,
+      "Invalid image file format",
+    ));
+  }
+
+  file.read_exact(&mut buffer)?;
+  let num_images = u32::from_be_bytes(buffer) as usize;
+
+  file.read_exact(&mut buffer)?;
+  let num_rows = u32::from_be_bytes(buffer) as usize;
+
+  file.read_exact(&mut buffer)?;
+  let num_cols = u32::from_be_bytes(buffer) as usize;
+
+  let mut images = Vec::with_capacity(num_images);
+  let mut image_buffer = vec![0u8; num_rows * num_cols];
+
+  for _ in 0..num_images {
+    file.read_exact(&mut image_buffer)?;
+    let pixels: Vec<f64> = image_buffer
+      .iter()
+      .map(|&pixel| pixel as f64 / 255.0)
+      .collect();
+
+    images.push(Matrix {
+      rows: num_rows * num_cols,
+      columns: 1,
+      inner: pixels,
+    });
+  }
+
+  Ok(images)
+}
+
+fn read_labels<P: AsRef<Path>>(path: P) -> io::Result<Vec<Matrix>> {
+  let mut file = File::open(path)?;
+
+  let mut buffer = [0u8; 4];
+
+  file.read_exact(&mut buffer)?;
+  let magic_number = u32::from_be_bytes(buffer);
+
+  if magic_number != 2049 {
+    return Err(io::Error::new(
+      io::ErrorKind::InvalidData,
+      "Invalid label file format",
+    ));
+  }
+
+  file.read_exact(&mut buffer)?;
+
+  let num_labels = u32::from_be_bytes(buffer) as usize;
+
+  let mut labels = Vec::with_capacity(num_labels);
+  let mut label_buffer = [0u8; 1];
+
+  for _ in 0..num_labels {
+    file.read_exact(&mut label_buffer)?;
+    let mut label_vector = vec![0.0; 10];
+    label_vector[label_buffer[0] as usize] = 1.0;
+    labels.push(Matrix {
+      rows: 10,
+      columns: 1,
+      inner: label_vector,
+    });
+  }
+
+  Ok(labels)
+}
 
 #[derive(Debug, Clone)]
 struct Matrix {
@@ -242,7 +366,22 @@ fn sigmoid_derivative(x: f64) -> f64 {
   x * (1.0 - x)
 }
 
-fn main() {
+fn run() -> Result {
+  let mnist_data = load_mnist("data")?;
+
+  println!(
+    "Loaded {} training images",
+    mnist_data.training_images.len()
+  );
+
+  println!(
+    "Loaded {} training labels",
+    mnist_data.training_labels.len()
+  );
+
+  println!("Loaded {} test images", mnist_data.test_images.len());
+  println!("Loaded {} test labels", mnist_data.test_labels.len());
+
   let mut network = Network::new(NetworkConfig::default());
 
   let input = Matrix {
@@ -250,6 +389,7 @@ fn main() {
     columns: 1,
     inner: vec![0.5, 0.1, 0.9],
   };
+
   let target = Matrix {
     rows: 3,
     columns: 1,
@@ -287,11 +427,42 @@ fn main() {
   println!("Input: {:?}", input);
   println!("Output: {:?}", output);
   println!("Target: {:?}", target);
+
+  Ok(())
+}
+
+fn main() {
+  if let Err(error) = run() {
+    eprintln!("error: {error}");
+    process::exit(1);
+  }
 }
 
 #[cfg(test)]
 mod tests {
   use {super::*, approx::assert_relative_eq};
+
+  #[test]
+  fn test_mnist_data_loading() {
+    let mnist_path = "data";
+
+    let result = load_mnist(mnist_path);
+
+    assert!(result.is_ok());
+
+    let mnist_data = result.unwrap();
+
+    assert_eq!(mnist_data.training_images.len(), 60000);
+    assert_eq!(mnist_data.training_labels.len(), 60000);
+    assert_eq!(mnist_data.test_images.len(), 10000);
+    assert_eq!(mnist_data.test_labels.len(), 10000);
+
+    assert_eq!(mnist_data.training_images[0].rows, 784);
+    assert_eq!(mnist_data.training_images[0].columns, 1);
+
+    assert_eq!(mnist_data.training_labels[0].rows, 10);
+    assert_eq!(mnist_data.training_labels[0].columns, 1);
+  }
 
   #[test]
   fn matrix_new() {
