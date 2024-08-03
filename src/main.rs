@@ -356,6 +356,83 @@ impl Network {
       .clone()
       .add(weight_input_hidden_delta);
   }
+
+  fn train_batch(&mut self, inputs: &[Matrix], targets: &[Matrix]) {
+    let batch_size = inputs.len();
+
+    debug_assert_eq!(
+      batch_size,
+      targets.len(),
+      "Inputs and targets must have the same batch size"
+    );
+
+    let mut weight_input_hidden_delta =
+      Matrix::new(self.config.hidden, self.config.input);
+
+    let mut weight_hidden_output_delta =
+      Matrix::new(self.config.output, self.config.hidden);
+
+    for (input, target) in inputs.iter().zip(targets.iter()) {
+      let hidden = self
+        .config
+        .weight_input_hidden
+        .multiply(input)
+        .apply(sigmoid);
+
+      let output = self
+        .config
+        .weight_hidden_output
+        .multiply(&hidden)
+        .apply(sigmoid);
+
+      let output_error = target.subtract(&output);
+
+      let output_delta =
+        output_error.hadamard_product(&output.apply(sigmoid_derivative));
+
+      let hidden_error = self
+        .config
+        .weight_hidden_output
+        .transpose()
+        .multiply(&output_delta);
+
+      let hidden_delta =
+        hidden_error.hadamard_product(&hidden.apply(sigmoid_derivative));
+
+      let hidden_transpose = hidden.transpose();
+
+      let input_transpose = input.transpose();
+
+      weight_hidden_output_delta = weight_hidden_output_delta
+        .add(output_delta.multiply(&hidden_transpose));
+
+      weight_input_hidden_delta =
+        weight_input_hidden_delta.add(hidden_delta.multiply(&input_transpose));
+    }
+
+    self.config.weight_hidden_output =
+      self.config.weight_hidden_output.clone().add(
+        weight_hidden_output_delta
+          .apply(|x| x * self.config.learning_rate / batch_size as f64),
+      );
+
+    self.config.weight_input_hidden =
+      self.config.weight_input_hidden.clone().add(
+        weight_input_hidden_delta
+          .apply(|x| x * self.config.learning_rate / batch_size as f64),
+      );
+  }
+
+  fn evaluate(&self, inputs: &[Matrix], targets: &[Matrix]) -> f64 {
+    let mut correct = 0;
+    for (input, target) in inputs.iter().zip(targets.iter()) {
+      let output = self.forward(input);
+      if argmax(&output.inner) == argmax(&target.inner) {
+        correct += 1;
+      }
+    }
+    correct as f64 / inputs.len() as f64
+  }
 }
 
 fn sigmoid(x: f64) -> f64 {
@@ -364,6 +441,15 @@ fn sigmoid(x: f64) -> f64 {
 
 fn sigmoid_derivative(x: f64) -> f64 {
   x * (1.0 - x)
+}
+
+fn argmax(vec: &[f64]) -> usize {
+  vec
+    .iter()
+    .enumerate()
+    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+    .map(|(index, _)| index)
+    .unwrap()
 }
 
 fn run() -> Result {
@@ -380,53 +466,52 @@ fn run() -> Result {
   );
 
   println!("Loaded {} test images", mnist_data.test_images.len());
+
   println!("Loaded {} test labels", mnist_data.test_labels.len());
 
-  let mut network = Network::new(NetworkConfig::default());
-
-  let input = Matrix {
-    rows: 3,
-    columns: 1,
-    inner: vec![0.5, 0.1, 0.9],
+  let config = NetworkConfig {
+    input: 784,
+    hidden: 128,
+    output: 10,
+    learning_rate: 0.1,
+    weight_input_hidden: Matrix::new(128, 784),
+    weight_hidden_output: Matrix::new(10, 128),
   };
 
-  let target = Matrix {
-    rows: 3,
-    columns: 1,
-    inner: vec![0.8, 0.2, 0.7],
-  };
+  let mut network = Network::new(config);
 
-  println!("Input shape: {}x{}", input.rows, input.columns);
+  let epochs = 10;
+  let batch_size = 32;
 
-  println!("Target shape: {}x{}", target.rows, target.columns);
+  for epoch in 0..epochs {
+    let mut indices: Vec<usize> =
+      (0..mnist_data.training_images.len()).collect();
 
-  println!(
-    "Weight input hidden shape: {}x{}",
-    network.config.weight_input_hidden.rows,
-    network.config.weight_input_hidden.columns
-  );
+    indices.shuffle(&mut thread_rng());
 
-  println!(
-    "Weight hidden output shape: {}x{}",
-    network.config.weight_hidden_output.rows,
-    network.config.weight_hidden_output.columns
-  );
+    for batch in indices.chunks(batch_size) {
+      let batch_inputs: Vec<Matrix> = batch
+        .iter()
+        .map(|&i| mnist_data.training_images[i].clone())
+        .collect();
 
-  for i in 0..10000 {
-    network.train(&input, &target);
+      let batch_targets: Vec<Matrix> = batch
+        .iter()
+        .map(|&i| mnist_data.training_labels[i].clone())
+        .collect();
 
-    if i % 1000 == 0 {
-      let output = network.forward(&input);
-      println!("Iteration {}: Output = {:?}", i, output);
+      network.train_batch(&batch_inputs, &batch_targets);
     }
+
+    let accuracy =
+      network.evaluate(&mnist_data.test_images, &mnist_data.test_labels);
+
+    println!(
+      "Epoch {}: Test accuracy = {:.2}%",
+      epoch + 1,
+      accuracy * 100.0
+    );
   }
-
-  let output = network.forward(&input);
-
-  println!("Final prediction:");
-  println!("Input: {:?}", input);
-  println!("Output: {:?}", output);
-  println!("Target: {:?}", target);
 
   Ok(())
 }
