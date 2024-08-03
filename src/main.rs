@@ -19,109 +19,106 @@ pub struct MnistData {
   test_labels: Vec<Matrix>,
 }
 
-pub fn load_mnist(path: &str) -> Result<MnistData> {
-  let train_images_path = Path::new(path)
-    .join("train-images-idx3-ubyte")
-    .join("train-images-idx3-ubyte");
-
-  let train_labels_path = Path::new(path)
-    .join("train-labels-idx1-ubyte")
-    .join("train-labels-idx1-ubyte");
-
-  let test_images_path = Path::new(path)
-    .join("t10k-images-idx3-ubyte")
-    .join("t10k-images-idx3-ubyte");
-
-  let test_labels_path = Path::new(path)
-    .join("t10k-labels-idx1-ubyte")
-    .join("t10k-labels-idx1-ubyte");
-
-  Ok(MnistData {
-    training_images: read_images(train_images_path)?,
-    training_labels: read_labels(train_labels_path)?,
-    test_images: read_images(test_images_path)?,
-    test_labels: read_labels(test_labels_path)?,
-  })
-}
-
-fn read_images<P: AsRef<Path>>(path: P) -> io::Result<Vec<Matrix>> {
-  let mut file = File::open(path)?;
-  let mut buffer = [0u8; 4];
-
-  file.read_exact(&mut buffer)?;
-
-  let magic_number = u32::from_be_bytes(buffer);
-
-  if magic_number != 2051 {
-    return Err(io::Error::new(
-      io::ErrorKind::InvalidData,
-      "Invalid image file format",
-    ));
+impl MnistData {
+  fn load(path: &str) -> Result<MnistData> {
+    Ok(MnistData {
+      training_images: Self::read_images(
+        Path::new(path).join("train-images-idx3-ubyte"),
+      )?,
+      training_labels: Self::read_labels(
+        Path::new(path).join("train-labels-idx1-ubyte"),
+      )?,
+      test_images: Self::read_images(
+        Path::new(path).join("t10k-images-idx3-ubyte"),
+      )?,
+      test_labels: Self::read_labels(
+        Path::new(path).join("t10k-labels-idx1-ubyte"),
+      )?,
+    })
   }
 
-  file.read_exact(&mut buffer)?;
-  let num_images = u32::from_be_bytes(buffer) as usize;
+  fn read_images<P: AsRef<Path>>(path: P) -> io::Result<Vec<Matrix>> {
+    let mut file = File::open(path)?;
+    let mut buffer = [0u8; 4];
 
-  file.read_exact(&mut buffer)?;
-  let num_rows = u32::from_be_bytes(buffer) as usize;
+    file.read_exact(&mut buffer)?;
 
-  file.read_exact(&mut buffer)?;
-  let num_cols = u32::from_be_bytes(buffer) as usize;
+    let magic_number = u32::from_be_bytes(buffer);
 
-  let mut images = Vec::with_capacity(num_images);
-  let mut image_buffer = vec![0u8; num_rows * num_cols];
+    if magic_number != 2051 {
+      return Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "Invalid image file format",
+      ));
+    }
 
-  for _ in 0..num_images {
-    file.read_exact(&mut image_buffer)?;
-    let pixels: Vec<f64> = image_buffer
-      .iter()
-      .map(|&pixel| pixel as f64 / 255.0)
-      .collect();
+    file.read_exact(&mut buffer)?;
+    let num_images = u32::from_be_bytes(buffer) as usize;
 
-    images.push(Matrix {
-      rows: num_rows * num_cols,
-      columns: 1,
-      inner: pixels,
-    });
+    file.read_exact(&mut buffer)?;
+    let num_rows = u32::from_be_bytes(buffer) as usize;
+
+    file.read_exact(&mut buffer)?;
+    let num_cols = u32::from_be_bytes(buffer) as usize;
+
+    let mut images = Vec::with_capacity(num_images);
+    let mut image_buffer = vec![0u8; num_rows * num_cols];
+
+    for _ in 0..num_images {
+      file.read_exact(&mut image_buffer)?;
+
+      let pixels: Vec<f64> = image_buffer
+        .iter()
+        .map(|&pixel| pixel as f64 / 255.0)
+        .collect();
+
+      images.push(Matrix {
+        rows: num_rows * num_cols,
+        columns: 1,
+        inner: pixels,
+      });
+    }
+
+    Ok(images)
   }
 
-  Ok(images)
-}
+  fn read_labels<P: AsRef<Path>>(path: P) -> io::Result<Vec<Matrix>> {
+    let mut file = File::open(path)?;
 
-fn read_labels<P: AsRef<Path>>(path: P) -> io::Result<Vec<Matrix>> {
-  let mut file = File::open(path)?;
+    let mut buffer = [0u8; 4];
 
-  let mut buffer = [0u8; 4];
+    file.read_exact(&mut buffer)?;
+    let magic_number = u32::from_be_bytes(buffer);
 
-  file.read_exact(&mut buffer)?;
-  let magic_number = u32::from_be_bytes(buffer);
+    if magic_number != 2049 {
+      return Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "Invalid label file format",
+      ));
+    }
 
-  if magic_number != 2049 {
-    return Err(io::Error::new(
-      io::ErrorKind::InvalidData,
-      "Invalid label file format",
-    ));
+    file.read_exact(&mut buffer)?;
+
+    let num_labels = u32::from_be_bytes(buffer) as usize;
+
+    let mut labels = Vec::with_capacity(num_labels);
+    let mut label_buffer = [0u8; 1];
+
+    for _ in 0..num_labels {
+      file.read_exact(&mut label_buffer)?;
+      let mut label_vector = vec![0.0; 10];
+
+      label_vector[label_buffer[0] as usize] = 1.0;
+
+      labels.push(Matrix {
+        rows: 10,
+        columns: 1,
+        inner: label_vector,
+      });
+    }
+
+    Ok(labels)
   }
-
-  file.read_exact(&mut buffer)?;
-
-  let num_labels = u32::from_be_bytes(buffer) as usize;
-
-  let mut labels = Vec::with_capacity(num_labels);
-  let mut label_buffer = [0u8; 1];
-
-  for _ in 0..num_labels {
-    file.read_exact(&mut label_buffer)?;
-    let mut label_vector = vec![0.0; 10];
-    label_vector[label_buffer[0] as usize] = 1.0;
-    labels.push(Matrix {
-      rows: 10,
-      columns: 1,
-      inner: label_vector,
-    });
-  }
-
-  Ok(labels)
 }
 
 #[derive(Debug, Clone)]
@@ -305,6 +302,7 @@ impl Network {
       .apply(sigmoid)
   }
 
+  #[cfg(test)]
   fn train(&mut self, input: &Matrix, target: &Matrix) {
     let hidden = self
       .config
@@ -425,12 +423,15 @@ impl Network {
 
   fn evaluate(&self, inputs: &[Matrix], targets: &[Matrix]) -> f64 {
     let mut correct = 0;
+
     for (input, target) in inputs.iter().zip(targets.iter()) {
       let output = self.forward(input);
+
       if argmax(&output.inner) == argmax(&target.inner) {
         correct += 1;
       }
     }
+
     correct as f64 / inputs.len() as f64
   }
 }
@@ -453,7 +454,7 @@ fn argmax(vec: &[f64]) -> usize {
 }
 
 fn run() -> Result {
-  let mnist_data = load_mnist("data")?;
+  let mnist_data = MnistData::load("data")?;
 
   println!(
     "Loaded {} training images",
@@ -529,9 +530,7 @@ mod tests {
 
   #[test]
   fn test_mnist_data_loading() {
-    let mnist_path = "data";
-
-    let result = load_mnist(mnist_path);
+    let result = MnistData::load("data");
 
     assert!(result.is_ok());
 
