@@ -2,7 +2,7 @@ use {
   anyhow::{bail, Context, Result},
   clap::Parser,
   indicatif::{ProgressBar, ProgressStyle},
-  ndarray::{Array, Array2, ArrayView1, ArrayView2, Axis},
+  ndarray::{Array, Array2, ArrayView, ArrayView2, Axis},
   ndarray_rand::rand_distr::Uniform,
   ndarray_rand::RandomExt,
   rand::seq::SliceRandom,
@@ -249,9 +249,9 @@ impl Network {
   fn evaluate(&self, inputs: ArrayView2<f64>, targets: ArrayView2<f64>) -> f64 {
     let outputs = self.forward(inputs);
 
-    let predicted = outputs.map_axis(Axis(0), |row| argmax(&row));
+    let predicted = outputs.map_axis(Axis(0), |row| argmax(&row.view()));
 
-    let actual = targets.map_axis(Axis(1), |row| argmax(&row));
+    let actual = targets.map_axis(Axis(1), |row| argmax(&row.view()));
 
     (predicted
       .iter()
@@ -285,7 +285,9 @@ impl Network {
   }
 
   fn predict(&self, input: ArrayView2<f64>) -> Array2<f64> {
-    self.forward(input)
+    let hidden = self.config.weight_input_hidden.dot(&input.t()).mapv(relu);
+    let output = self.config.weight_hidden_output.dot(&hidden).mapv(sigmoid);
+    output
   }
 }
 
@@ -309,9 +311,11 @@ fn relu_derivative(x: f64) -> f64 {
   }
 }
 
-fn argmax(row: &ArrayView1<f64>) -> usize {
-  row
-    .iter()
+fn argmax<D>(x: &ArrayView<f64, D>) -> usize
+where
+  D: ndarray::Dimension,
+{
+  x.iter()
     .enumerate()
     .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
     .map(|(index, _)| index)
@@ -390,13 +394,14 @@ fn train(epochs: usize, batch_size: usize, output: PathBuf) -> Result<()> {
 fn predict(weights: PathBuf, image_path: PathBuf) -> Result<()> {
   let network = Network::load_weights(&weights.clone())?;
 
-  println!("Loaded weights from {}", weights.display());
-
   let image = read_image(image_path)?;
-  let prediction = network.predict(image.view());
-  let digit = argmax(&prediction.view().row(0));
 
-  println!("Predicted digit: {}", digit);
+  let prediction = network.predict(image.view());
+
+  println!(
+    "Predicted digit: {}",
+    argmax(&prediction.view().index_axis(Axis(1), 0))
+  );
 
   Ok(())
 }

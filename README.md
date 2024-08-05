@@ -37,6 +37,15 @@ Final accuracy: 96.45%
 Saved weights to weights.json
 ```
 
+### Inference
+
+You can use the `predict` subcommand with pre-defined weights to make
+predictions on new data.
+
+```bash
+cargo run -- predict --weights weights.json --image samples/2.png
+```
+
 ### Prior Art
 
 Wrote this while reading [**Make Your Own Neural Network**](https://www.amazon.ca/Make-Your-Own-Neural-Network/dp/1530826608) by Tariq Rashid.
