@@ -16,16 +16,16 @@ use {
 type Result<T = (), E = anyhow::Error> = std::result::Result<T, E>;
 
 #[derive(Debug)]
-pub struct MnistData {
+pub struct Dataset {
   training_images: Arc<Array2<f64>>,
   training_labels: Arc<Array2<f64>>,
   test_images: Arc<Array2<f64>>,
   test_labels: Arc<Array2<f64>>,
 }
 
-impl MnistData {
-  fn load(path: &str) -> Result<MnistData> {
-    Ok(MnistData {
+impl Dataset {
+  fn load(path: &str) -> Result<Dataset> {
+    Ok(Dataset {
       training_images: Arc::new(Self::read_images(
         Path::new(path).join("train-images-idx3-ubyte"),
       )?),
@@ -209,7 +209,7 @@ fn argmax(row: &ArrayView1<f64>) -> usize {
 }
 
 fn run() -> Result {
-  let mnist_data = MnistData::load("data")?;
+  let mnist_data = Dataset::load("data")?;
 
   println!(
     "Loaded {} training images",
@@ -274,7 +274,7 @@ mod tests {
 
   #[test]
   fn mnist_data_load() {
-    let mnist_data = MnistData::load("data").unwrap();
+    let mnist_data = Dataset::load("data").unwrap();
 
     assert_eq!(mnist_data.training_images.nrows(), 60000);
     assert_eq!(mnist_data.training_images.ncols(), 784);
