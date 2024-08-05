@@ -22,7 +22,7 @@ Options:
 ### Training
 
 Below are the results from training on the standard MNIST dataset. This used a
-learning rate of `0.1`, a batch size of `128`, and trained for 50 epochs. These
+learning rate of `0.1`, a batch size of `128`, and trained for `50` epochs. These
 values are configurable via the `train` subcommand.
 
 ```
