@@ -424,7 +424,23 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-  use {super::*, approx::assert_relative_eq, ndarray::array};
+  use {
+    super::*, approx::assert_relative_eq, ndarray::array, tempdir::TempDir,
+  };
+
+  fn compare_arrays_with_tolerance(
+    a: &Array2<f64>,
+    b: &Array2<f64>,
+    tolerance: f64,
+  ) -> bool {
+    if a.shape() != b.shape() {
+      return false;
+    }
+
+    a.iter()
+      .zip(b.iter())
+      .all(|(&x, &y)| (x - y).abs() < tolerance)
+  }
 
   #[test]
   fn sigmoid_works() {
@@ -495,5 +511,84 @@ mod tests {
     assert_eq!(mnist_data.test_images.ncols(), 784);
     assert_eq!(mnist_data.test_labels.nrows(), 10000);
     assert_eq!(mnist_data.test_labels.ncols(), 10);
+  }
+
+  #[test]
+  fn network_train_batch() {
+    let config = NetworkConfig {
+      learning_rate: 0.1,
+      weight_input_hidden: Array::random((5, 3), Uniform::new(-0.1, 0.1)),
+      weight_hidden_output: Array::random((2, 5), Uniform::new(-0.1, 0.1)),
+    };
+
+    let mut network = Network::new(config);
+
+    let inputs = array![[1.0, 0.0, -1.0], [-1.0, 1.0, 0.0]];
+    let targets = array![[1.0, 0.0], [0.0, 1.0]];
+
+    network.train_batch(inputs.view(), targets.view());
+
+    assert!(
+      network.config.weight_input_hidden.iter().any(|&x| x != 0.0),
+      "Input-hidden weights were not updated"
+    );
+
+    assert!(
+      network
+        .config
+        .weight_hidden_output
+        .iter()
+        .any(|&x| x != 0.0),
+      "Hidden-output weights were not updated"
+    );
+  }
+
+  #[test]
+  fn network_evaluate() {
+    let config = NetworkConfig {
+      learning_rate: 0.1,
+      weight_input_hidden: array![[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+      weight_hidden_output: array![[0.7, 0.8], [0.9, 1.0]],
+    };
+
+    let network = Network::new(config);
+
+    let inputs = array![[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]];
+    let targets = array![[1.0, 0.0], [0.0, 1.0]];
+
+    let accuracy = network.evaluate(inputs.view(), targets.view());
+
+    assert!(accuracy >= 0.0 && accuracy <= 1.0);
+  }
+
+  #[test]
+  fn network_save_and_load_weights() {
+    let dir = TempDir::new("test").unwrap();
+
+    let weight_path = dir.path().join("test_weights.json");
+
+    let original_config = NetworkConfig::default();
+    let original_network = Network::new(original_config);
+
+    original_network.save_weights(&weight_path).unwrap();
+
+    let loaded_network = Network::load_weights(&weight_path).unwrap();
+
+    assert_relative_eq!(
+      original_network.config.learning_rate,
+      loaded_network.config.learning_rate
+    );
+
+    assert!(compare_arrays_with_tolerance(
+      &original_network.config.weight_input_hidden,
+      &loaded_network.config.weight_input_hidden,
+      1e-6
+    ));
+
+    assert!(compare_arrays_with_tolerance(
+      &original_network.config.weight_hidden_output,
+      &loaded_network.config.weight_hidden_output,
+      1e-6
+    ));
   }
 }
