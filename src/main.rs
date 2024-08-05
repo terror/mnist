@@ -9,7 +9,7 @@ use {
     io::{self, Read},
     path::Path,
     process,
-    sync::Arc,
+    sync::{Arc, RwLock},
   },
 };
 
@@ -47,6 +47,7 @@ impl MnistData {
 
     file.read_exact(&mut buffer)?;
     let magic_number = u32::from_be_bytes(buffer);
+
     if magic_number != 2051 {
       return Err(io::Error::new(
         io::ErrorKind::InvalidData,
@@ -56,8 +57,10 @@ impl MnistData {
 
     file.read_exact(&mut buffer)?;
     let num_images = u32::from_be_bytes(buffer) as usize;
+
     file.read_exact(&mut buffer)?;
     let num_rows = u32::from_be_bytes(buffer) as usize;
+
     file.read_exact(&mut buffer)?;
     let num_cols = u32::from_be_bytes(buffer) as usize;
 
@@ -82,6 +85,7 @@ impl MnistData {
 
     file.read_exact(&mut buffer)?;
     let magic_number = u32::from_be_bytes(buffer);
+
     if magic_number != 2049 {
       return Err(io::Error::new(
         io::ErrorKind::InvalidData,
@@ -96,6 +100,7 @@ impl MnistData {
     file.read_exact(&mut label_buffer)?;
 
     let mut labels = Array2::zeros((num_labels, 10));
+
     for (i, &label) in label_buffer.iter().enumerate() {
       labels[[i, label as usize]] = 1.0;
     }
@@ -106,9 +111,6 @@ impl MnistData {
 
 #[derive(Debug)]
 struct NetworkConfig {
-  input: usize,
-  hidden: usize,
-  output: usize,
   learning_rate: f64,
   weight_input_hidden: Array2<f64>,
   weight_hidden_output: Array2<f64>,
@@ -117,9 +119,6 @@ struct NetworkConfig {
 impl Default for NetworkConfig {
   fn default() -> Self {
     Self {
-      input: 784,
-      hidden: 128,
-      output: 10,
       learning_rate: 0.1,
       weight_input_hidden: Array::random((128, 784), Uniform::new(-0.1, 0.1)),
       weight_hidden_output: Array::random((10, 128), Uniform::new(-0.1, 0.1)),
@@ -159,13 +158,16 @@ impl Network {
 
     self.config.weight_hidden_output += &(weight_hidden_output_delta
       * (self.config.learning_rate / batch_size as f64));
+
     self.config.weight_input_hidden += &(weight_input_hidden_delta
       * (self.config.learning_rate / batch_size as f64));
   }
 
   fn evaluate(&self, inputs: ArrayView2<f64>, targets: ArrayView2<f64>) -> f64 {
     let outputs = self.forward(inputs);
+
     let predicted = outputs.map_axis(Axis(0), |row| argmax(&row));
+
     let actual = targets.map_axis(Axis(1), |row| argmax(&row));
 
     (predicted
@@ -213,20 +215,19 @@ fn run() -> Result {
     "Loaded {} training images",
     mnist_data.training_images.nrows()
   );
+
   println!(
     "Loaded {} training labels",
     mnist_data.training_labels.nrows()
   );
+
   println!("Loaded {} test images", mnist_data.test_images.nrows());
+
   println!("Loaded {} test labels", mnist_data.test_labels.nrows());
 
-  use std::sync::RwLock;
+  let network = Arc::new(RwLock::new(Network::new(NetworkConfig::default())));
 
-  let config = NetworkConfig::default();
-  let network = Arc::new(RwLock::new(Network::new(config)));
-
-  let epochs = 10;
-  let batch_size = 128;
+  let (epochs, batch_size) = (10, 128);
 
   let mut indices: Vec<usize> =
     (0..mnist_data.training_images.nrows()).collect();
@@ -236,12 +237,20 @@ fn run() -> Result {
 
     indices.par_chunks(batch_size).for_each(|batch| {
       let batch_inputs = mnist_data.training_images.select(Axis(0), batch);
+
       let batch_targets = mnist_data.training_labels.select(Axis(0), batch);
-      network.write().unwrap().train_batch((&batch_inputs).into(), (&batch_targets).into());
+
+      network
+        .write()
+        .unwrap()
+        .train_batch((&batch_inputs).into(), (&batch_targets).into());
     });
 
-    let accuracy =
-      network.read().unwrap().evaluate(mnist_data.test_images.view(), mnist_data.test_labels.view());
+    let accuracy = network
+      .read()
+      .unwrap()
+      .evaluate(mnist_data.test_images.view(), mnist_data.test_labels.view());
+
     println!(
       "Epoch {}: Test accuracy = {:.2}%",
       epoch + 1,
@@ -256,5 +265,81 @@ fn main() {
   if let Err(error) = run() {
     eprintln!("error: {error}");
     process::exit(1);
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use {super::*, approx::assert_relative_eq, ndarray::array};
+
+  #[test]
+  fn mnist_data_load() {
+    let mnist_data = MnistData::load("data").unwrap();
+
+    assert_eq!(mnist_data.training_images.nrows(), 60000);
+    assert_eq!(mnist_data.training_images.ncols(), 784);
+    assert_eq!(mnist_data.training_labels.nrows(), 60000);
+    assert_eq!(mnist_data.training_labels.ncols(), 10);
+    assert_eq!(mnist_data.test_images.nrows(), 10000);
+    assert_eq!(mnist_data.test_images.ncols(), 784);
+    assert_eq!(mnist_data.test_labels.nrows(), 10000);
+    assert_eq!(mnist_data.test_labels.ncols(), 10);
+  }
+
+  #[test]
+  fn sigmoid_works() {
+    assert_relative_eq!(sigmoid(0.0), 0.5, epsilon = 1e-6);
+    assert_relative_eq!(sigmoid(1.0), 0.7310585786300049, epsilon = 1e-6);
+    assert_relative_eq!(sigmoid(-1.0), 0.2689414213699951, epsilon = 1e-6);
+  }
+
+  #[test]
+  fn relu_works() {
+    assert_eq!(relu(1.0), 1.0);
+    assert_eq!(relu(-1.0), 0.0);
+    assert_eq!(relu(0.0), 0.0);
+  }
+
+  #[test]
+  fn argmax_works() {
+    let arr = array![0.1, 0.3, 0.2, 0.4, 0.1];
+    assert_eq!(argmax(&arr.view()), 3);
+  }
+
+  #[test]
+  fn network_forward() {
+    let config = NetworkConfig {
+      learning_rate: 0.1,
+      weight_input_hidden: array![[0.1, 0.2], [0.3, 0.4]],
+      weight_hidden_output: array![[0.5, 0.6], [0.7, 0.8]],
+    };
+
+    let network = Network::new(config);
+
+    let input = array![[1.0, 1.0]];
+    let output = network.forward(input.view());
+
+    let expected_output = array![
+      [sigmoid(0.5 * 0.3 + 0.6 * 0.7)],
+      [sigmoid(0.7 * 0.3 + 0.8 * 0.7)]
+    ];
+
+    assert_eq!(
+      output.shape(),
+      expected_output.shape(),
+      "Output shape mismatch"
+    );
+
+    assert_relative_eq!(
+      output[[0, 0]],
+      expected_output[[0, 0]],
+      epsilon = 1e-6
+    );
+
+    assert_relative_eq!(
+      output[[1, 0]],
+      expected_output[[1, 0]],
+      epsilon = 1e-6
+    );
   }
 }
