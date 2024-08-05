@@ -1,4 +1,5 @@
 use {
+  anyhow::bail,
   ndarray::{Array, Array2, ArrayView1, ArrayView2, Axis},
   ndarray_rand::rand_distr::Uniform,
   ndarray_rand::RandomExt,
@@ -6,14 +7,12 @@ use {
   rayon::prelude::*,
   std::{
     fs::File,
-    io::{self, Read},
+    io::Read,
     path::Path,
     process,
     sync::{Arc, RwLock},
   },
 };
-
-type Result<T = (), E = anyhow::Error> = std::result::Result<T, E>;
 
 #[derive(Debug)]
 pub struct Dataset {
@@ -41,7 +40,7 @@ impl Dataset {
     })
   }
 
-  fn read_images<P: AsRef<Path>>(path: P) -> io::Result<Array2<f64>> {
+  fn read_images<P: AsRef<Path>>(path: P) -> Result<Array2<f64>> {
     let mut file = File::open(path)?;
     let mut buffer = [0u8; 4];
 
@@ -49,10 +48,7 @@ impl Dataset {
     let magic_number = u32::from_be_bytes(buffer);
 
     if magic_number != 2051 {
-      return Err(io::Error::new(
-        io::ErrorKind::InvalidData,
-        "Invalid image file format",
-      ));
+      bail!("invalid image file format");
     }
 
     file.read_exact(&mut buffer)?;
@@ -79,7 +75,7 @@ impl Dataset {
     Ok(images)
   }
 
-  fn read_labels<P: AsRef<Path>>(path: P) -> io::Result<Array2<f64>> {
+  fn read_labels<P: AsRef<Path>>(path: P) -> Result<Array2<f64>> {
     let mut file = File::open(path)?;
     let mut buffer = [0u8; 4];
 
@@ -87,10 +83,7 @@ impl Dataset {
     let magic_number = u32::from_be_bytes(buffer);
 
     if magic_number != 2049 {
-      return Err(io::Error::new(
-        io::ErrorKind::InvalidData,
-        "Invalid label file format",
-      ));
+      bail!("invalid label file format");
     }
 
     file.read_exact(&mut buffer)?;
@@ -227,7 +220,7 @@ fn run() -> Result {
 
   let network = Arc::new(RwLock::new(Network::new(NetworkConfig::default())));
 
-  let (epochs, batch_size) = (10, 128);
+  let (epochs, batch_size) = (50, 128);
 
   let mut indices: Vec<usize> =
     (0..mnist_data.training_images.nrows()).collect();
@@ -260,6 +253,8 @@ fn run() -> Result {
 
   Ok(())
 }
+
+type Result<T = (), E = anyhow::Error> = std::result::Result<T, E>;
 
 fn main() {
   if let Err(error) = run() {
