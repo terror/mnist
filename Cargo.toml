@@ -6,7 +6,10 @@ publish = false
 
 [dependencies]
 anyhow = "1.0.86"
+ndarray = "0.16.0"
+ndarray-rand = "0.15.0"
 rand = "0.8.5"
+rayon = "1.10.0"
 
 [dev-dependencies]
 approx = "0.5.1"
