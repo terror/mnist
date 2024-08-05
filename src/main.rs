@@ -3,6 +3,7 @@ use {
   clap::Parser,
   indicatif::{ProgressBar, ProgressStyle},
   ndarray::{Array2, ArrayView, ArrayView2, Axis},
+  ndarray_rand::{rand_distr::Uniform, RandomExt},
   rand::seq::SliceRandom,
   rayon::prelude::*,
   serde::{Deserialize, Serialize},
@@ -57,7 +58,7 @@ struct Train {
 impl Train {
   fn run(self) -> Result {
     let mnist_data =
-      Dataset::load("data").context("Failed to load MNIST dataset")?;
+      Dataset::load("data").context("failed to load MNIST dataset")?;
 
     println!("Dataset loaded successfully:");
     println!("  Training images: {}", mnist_data.training_images.nrows());
@@ -117,7 +118,7 @@ impl Train {
       .read()
       .unwrap()
       .save_weights(&self.output)
-      .context("Failed to save network weights")?;
+      .context("failed to save network weights")?;
 
     println!("Saved weights to {}", self.output.display());
 
@@ -268,11 +269,21 @@ struct SerializableNetworkConfig {
   hidden_output_shape: (usize, usize),
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct NetworkConfig {
   learning_rate: f64,
   weight_input_hidden: Array2<f64>,
   weight_hidden_output: Array2<f64>,
+}
+
+impl Default for NetworkConfig {
+  fn default() -> Self {
+    NetworkConfig {
+      learning_rate: 0.1,
+      weight_input_hidden: Array2::random((100, 784), Uniform::new(-0.1, 0.1)),
+      weight_hidden_output: Array2::random((10, 100), Uniform::new(-0.1, 0.1)),
+    }
+  }
 }
 
 impl Into<SerializableNetworkConfig> for NetworkConfig {
@@ -369,20 +380,20 @@ impl Network {
     let serializable_config: SerializableNetworkConfig =
       self.config.clone().into();
 
-    let file = File::create(path).context("Failed to create weights file")?;
+    let file = File::create(path).context("failed to create weights file")?;
 
     serde_json::to_writer(file, &serializable_config)
-      .context("Failed to serialize network weights")?;
+      .context("failed to serialize network weights")?;
 
     Ok(())
   }
 
   fn load_weights(path: &PathBuf) -> Result<Self> {
-    let file = File::open(path).context("Failed to open weights file")?;
+    let file = File::open(path).context("failed to open weights file")?;
 
     let serializable_config: SerializableNetworkConfig =
       serde_json::from_reader(file)
-        .context("Failed to deserialize network weights")?;
+        .context("failed to deserialize network weights")?;
 
     let config = NetworkConfig::try_from(serializable_config)?;
 
@@ -436,7 +447,6 @@ mod tests {
     super::*,
     approx::assert_relative_eq,
     ndarray::{array, Array},
-    ndarray_rand::{rand_distr::Uniform, RandomExt},
     tempdir::TempDir,
   };
 
