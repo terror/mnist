@@ -1,18 +1,65 @@
 use {
-  anyhow::bail,
+  anyhow::{bail, Context, Result},
+  clap::Parser,
+  indicatif::{ProgressBar, ProgressStyle},
   ndarray::{Array, Array2, ArrayView1, ArrayView2, Axis},
   ndarray_rand::rand_distr::Uniform,
   ndarray_rand::RandomExt,
   rand::seq::SliceRandom,
   rayon::prelude::*,
+  serde::{Deserialize, Serialize},
   std::{
-    fs::File,
+    fs::{read, File},
     io::Read,
     path::Path,
+    path::PathBuf,
     process,
     sync::{Arc, RwLock},
   },
 };
+
+#[derive(Debug, Parser)]
+struct Arguments {
+  #[clap(subcommand)]
+  subcommand: Subcommand,
+}
+
+impl Arguments {
+  fn run(self) -> Result<()> {
+    self.subcommand.run()
+  }
+}
+
+#[derive(Debug, Parser)]
+enum Subcommand {
+  Train {
+    #[clap(short, long, default_value = "50")]
+    epochs: usize,
+    #[clap(short, long, default_value = "128")]
+    batch_size: usize,
+    #[clap(short, long, default_value = "weights.json")]
+    output: PathBuf,
+  },
+  Predict {
+    #[clap(short, long)]
+    weights: PathBuf,
+    #[clap(short, long)]
+    image: PathBuf,
+  },
+}
+
+impl Subcommand {
+  fn run(self) -> Result<()> {
+    match self {
+      Subcommand::Train {
+        batch_size,
+        epochs,
+        output,
+      } => train(epochs, batch_size, output),
+      Subcommand::Predict { weights, image } => predict(weights, image),
+    }
+  }
+}
 
 #[derive(Debug)]
 pub struct Dataset {
@@ -102,11 +149,54 @@ impl Dataset {
   }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializableNetworkConfig {
+  learning_rate: f64,
+  weight_input_hidden: Vec<f64>,
+  weight_hidden_output: Vec<f64>,
+  input_hidden_shape: (usize, usize),
+  hidden_output_shape: (usize, usize),
+}
+
 #[derive(Debug)]
 struct NetworkConfig {
   learning_rate: f64,
   weight_input_hidden: Array2<f64>,
   weight_hidden_output: Array2<f64>,
+}
+
+impl NetworkConfig {
+  fn to_serializable(&self) -> SerializableNetworkConfig {
+    SerializableNetworkConfig {
+      learning_rate: self.learning_rate,
+      weight_input_hidden: self
+        .weight_input_hidden
+        .clone()
+        .into_raw_vec_and_offset()
+        .0,
+      weight_hidden_output: self
+        .weight_hidden_output
+        .clone()
+        .into_raw_vec_and_offset()
+        .0,
+      input_hidden_shape: self.weight_input_hidden.dim(),
+      hidden_output_shape: self.weight_hidden_output.dim(),
+    }
+  }
+
+  fn from_serializable(config: SerializableNetworkConfig) -> Result<Self> {
+    Ok(Self {
+      learning_rate: config.learning_rate,
+      weight_input_hidden: Array2::from_shape_vec(
+        config.input_hidden_shape,
+        config.weight_input_hidden,
+      )?,
+      weight_hidden_output: Array2::from_shape_vec(
+        config.hidden_output_shape,
+        config.weight_hidden_output,
+      )?,
+    })
+  }
 }
 
 impl Default for NetworkConfig {
@@ -170,6 +260,33 @@ impl Network {
       .count() as f64)
       / inputs.nrows() as f64
   }
+
+  fn save_weights(&self, path: &PathBuf) -> Result<()> {
+    let serializable_config = self.config.to_serializable();
+
+    let file = File::create(path).context("Failed to create weights file")?;
+
+    serde_json::to_writer(file, &serializable_config)
+      .context("Failed to serialize network weights")?;
+
+    Ok(())
+  }
+
+  fn load_weights(path: &PathBuf) -> Result<Self> {
+    let file = File::open(path).context("Failed to open weights file")?;
+
+    let serializable_config: SerializableNetworkConfig =
+      serde_json::from_reader(file)
+        .context("Failed to deserialize network weights")?;
+
+    let config = NetworkConfig::from_serializable(serializable_config)?;
+
+    Ok(Self::new(config))
+  }
+
+  fn predict(&self, input: ArrayView2<f64>) -> Array2<f64> {
+    self.forward(input)
+  }
 }
 
 fn sigmoid(x: f64) -> f64 {
@@ -201,31 +318,32 @@ fn argmax(row: &ArrayView1<f64>) -> usize {
     .unwrap()
 }
 
-fn run() -> Result {
-  let mnist_data = Dataset::load("data")?;
+fn train(epochs: usize, batch_size: usize, output: PathBuf) -> Result<()> {
+  let mnist_data =
+    Dataset::load("data").context("Failed to load MNIST dataset")?;
 
-  println!(
-    "Loaded {} training images",
-    mnist_data.training_images.nrows()
-  );
-
-  println!(
-    "Loaded {} training labels",
-    mnist_data.training_labels.nrows()
-  );
-
-  println!("Loaded {} test images", mnist_data.test_images.nrows());
-
-  println!("Loaded {} test labels", mnist_data.test_labels.nrows());
+  println!("Dataset loaded successfully:");
+  println!("  Training images: {}", mnist_data.training_images.nrows());
+  println!("  Training labels: {}", mnist_data.training_labels.nrows());
+  println!("  Test images: {}", mnist_data.test_images.nrows());
+  println!("  Test labels: {}", mnist_data.test_labels.nrows());
 
   let network = Arc::new(RwLock::new(Network::new(NetworkConfig::default())));
-
-  let (epochs, batch_size) = (50, 128);
 
   let mut indices: Vec<usize> =
     (0..mnist_data.training_images.nrows()).collect();
 
-  for epoch in 0..epochs {
+  let progress_bar = ProgressBar::new(epochs as u64);
+
+  progress_bar.set_style(
+    ProgressStyle::default_bar()
+      .template(
+        "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} Epochs {msg}",
+      )?
+      .progress_chars("=>-"),
+  );
+
+  for _ in 0..epochs {
     indices.shuffle(&mut rand::thread_rng());
 
     indices.par_chunks(batch_size).for_each(|batch| {
@@ -244,20 +362,61 @@ fn run() -> Result {
       .unwrap()
       .evaluate(mnist_data.test_images.view(), mnist_data.test_labels.view());
 
-    println!(
-      "Epoch {}: Test accuracy = {:.2}%",
-      epoch + 1,
-      accuracy * 100.0
-    );
+    progress_bar.set_message(format!("Accuracy: {:.2}%", accuracy * 100.0));
+
+    progress_bar.inc(1);
   }
+
+  progress_bar.finish_with_message("Training complete");
+
+  network
+    .read()
+    .unwrap()
+    .save_weights(&output)
+    .context("Failed to save network weights")?;
+
+  println!("Saved weights to {}", output.display());
 
   Ok(())
 }
 
-type Result<T = (), E = anyhow::Error> = std::result::Result<T, E>;
+fn predict(weights: PathBuf, image_path: PathBuf) -> Result<()> {
+  let network = Network::load_weights(&weights.clone())?;
+
+  println!("Loaded weights from {}", weights.display());
+
+  let image = read_image(image_path)?;
+  let prediction = network.predict(image.view());
+  let digit = argmax(&prediction.view().row(0));
+
+  println!("Predicted digit: {}", digit);
+
+  Ok(())
+}
+
+fn read_image(path: PathBuf) -> Result<Array2<f64>> {
+  let image_data = read(path)?;
+
+  let image: image::ImageBuffer<image::Luma<u8>, Vec<u8>> =
+    image::load_from_memory(&image_data)?.to_luma8();
+
+  let (width, height) = image.dimensions();
+
+  if width != 28 || height != 28 {
+    bail!("Image must be 28x28 pixels");
+  }
+
+  let flat_image: Vec<f64> = image
+    .into_raw()
+    .into_iter()
+    .map(|p| p as f64 / 255.0)
+    .collect();
+
+  Ok(Array2::from_shape_vec((1, 784), flat_image)?)
+}
 
 fn main() {
-  if let Err(error) = run() {
+  if let Err(error) = Arguments::parse().run() {
     eprintln!("error: {error}");
     process::exit(1);
   }
