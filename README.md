@@ -4,6 +4,8 @@
 recognize handwritten digits, written in pure Rust with minimal dependencies
 used in the training process.
 
+<img width="1667" alt="Screenshot 2024-08-05 at 2 42 44 PM" src="https://github.com/user-attachments/assets/341a5bc9-383b-4186-84e5-fc579945555b">
+
 ### Usage
 
 Train the model and make predictions using saved weights.
