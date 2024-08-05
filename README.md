@@ -32,7 +32,7 @@ Dataset loaded successfully:
   Training labels: 60000
   Test images: 10000
   Test labels: 10000
-[00:07:26] =====>---------------------------------- 7/50 Epochs Accuracy: 92.18%
+[00:53:14] ======================================== 50/50 Epochs Training complete
 ```
 
 ### Prior Art
