@@ -273,20 +273,6 @@ mod tests {
   use {super::*, approx::assert_relative_eq, ndarray::array};
 
   #[test]
-  fn mnist_data_load() {
-    let mnist_data = Dataset::load("data").unwrap();
-
-    assert_eq!(mnist_data.training_images.nrows(), 60000);
-    assert_eq!(mnist_data.training_images.ncols(), 784);
-    assert_eq!(mnist_data.training_labels.nrows(), 60000);
-    assert_eq!(mnist_data.training_labels.ncols(), 10);
-    assert_eq!(mnist_data.test_images.nrows(), 10000);
-    assert_eq!(mnist_data.test_images.ncols(), 784);
-    assert_eq!(mnist_data.test_labels.nrows(), 10000);
-    assert_eq!(mnist_data.test_labels.ncols(), 10);
-  }
-
-  #[test]
   fn sigmoid_works() {
     assert_relative_eq!(sigmoid(0.0), 0.5, epsilon = 1e-6);
     assert_relative_eq!(sigmoid(1.0), 0.7310585786300049, epsilon = 1e-6);
@@ -341,5 +327,19 @@ mod tests {
       expected_output[[1, 0]],
       epsilon = 1e-6
     );
+  }
+
+  #[test]
+  fn mnist_data_load() {
+    let mnist_data = Dataset::load("data").unwrap();
+
+    assert_eq!(mnist_data.training_images.nrows(), 60000);
+    assert_eq!(mnist_data.training_images.ncols(), 784);
+    assert_eq!(mnist_data.training_labels.nrows(), 60000);
+    assert_eq!(mnist_data.training_labels.ncols(), 10);
+    assert_eq!(mnist_data.test_images.nrows(), 10000);
+    assert_eq!(mnist_data.test_images.ncols(), 784);
+    assert_eq!(mnist_data.test_labels.nrows(), 10000);
+    assert_eq!(mnist_data.test_labels.ncols(), 10);
   }
 }
