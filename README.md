@@ -33,6 +33,8 @@ Dataset loaded successfully:
   Test images: 10000
   Test labels: 10000
 [00:53:14] ======================================== 50/50 Epochs Training complete
+Final accuracy: 96.45%
+Saved weights to weights.json
 ```
 
 ### Prior Art

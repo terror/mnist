@@ -369,6 +369,13 @@ fn train(epochs: usize, batch_size: usize, output: PathBuf) -> Result<()> {
 
   progress_bar.finish_with_message("Training complete");
 
+  let accuracy = network
+    .read()
+    .unwrap()
+    .evaluate(mnist_data.test_images.view(), mnist_data.test_labels.view());
+
+  println!("Final accuracy: {:.2}%", accuracy * 100.0);
+
   network
     .read()
     .unwrap()
