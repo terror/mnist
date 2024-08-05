@@ -1,5 +1,5 @@
 use {
-  anyhow::{bail, Context, Result},
+  anyhow::{bail, Context},
   clap::Parser,
   indicatif::{ProgressBar, ProgressStyle},
   ndarray::{Array, Array2, ArrayView, ArrayView2, Axis},
@@ -16,6 +16,7 @@ use {
     process,
     sync::{Arc, RwLock},
   },
+  Subcommand::*,
 };
 
 #[derive(Debug, Parser)]
@@ -25,39 +26,150 @@ struct Arguments {
 }
 
 impl Arguments {
-  fn run(self) -> Result<()> {
+  fn run(self) -> Result {
     self.subcommand.run()
   }
 }
 
 #[derive(Debug, Parser)]
 enum Subcommand {
-  Train {
-    #[clap(short, long, default_value = "50")]
-    epochs: usize,
-    #[clap(short, long, default_value = "128")]
-    batch_size: usize,
-    #[clap(short, long, default_value = "weights.json")]
-    output: PathBuf,
-  },
-  Predict {
-    #[clap(short, long)]
-    weights: PathBuf,
-    #[clap(short, long)]
-    image: PathBuf,
-  },
+  Predict(Predict),
+  Train(Train),
 }
 
 impl Subcommand {
-  fn run(self) -> Result<()> {
+  fn run(self) -> Result {
     match self {
-      Subcommand::Train {
-        batch_size,
-        epochs,
-        output,
-      } => train(epochs, batch_size, output),
-      Subcommand::Predict { weights, image } => predict(weights, image),
+      Predict(predict) => predict.run(),
+      Train(train) => train.run(),
     }
+  }
+}
+
+#[derive(Debug, Parser)]
+struct Train {
+  #[clap(short, long, default_value = "50")]
+  epochs: usize,
+  #[clap(short, long, default_value = "128")]
+  batch_size: usize,
+  #[clap(short, long, default_value = "weights.json")]
+  output: PathBuf,
+}
+
+impl Train {
+  fn run(self) -> Result {
+    let mnist_data =
+      Dataset::load("data").context("Failed to load MNIST dataset")?;
+
+    println!("Dataset loaded successfully:");
+    println!("  Training images: {}", mnist_data.training_images.nrows());
+    println!("  Training labels: {}", mnist_data.training_labels.nrows());
+    println!("  Test images: {}", mnist_data.test_images.nrows());
+    println!("  Test labels: {}", mnist_data.test_labels.nrows());
+
+    let network = Arc::new(RwLock::new(Network::new(NetworkConfig::default())));
+
+    let mut indices: Vec<usize> =
+      (0..mnist_data.training_images.nrows()).collect();
+
+    let progress_bar = ProgressBar::new(self.epochs as u64);
+
+    progress_bar.set_style(
+      ProgressStyle::default_bar()
+        .template(
+          "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} Epochs {msg}",
+        )?
+        .progress_chars("=>-"),
+    );
+
+    for _ in 0..self.epochs {
+      indices.shuffle(&mut rand::thread_rng());
+
+      indices.par_chunks(self.batch_size).for_each(|batch| {
+        let batch_inputs = mnist_data.training_images.select(Axis(0), batch);
+
+        let batch_targets = mnist_data.training_labels.select(Axis(0), batch);
+
+        network
+          .write()
+          .unwrap()
+          .train_batch((&batch_inputs).into(), (&batch_targets).into());
+      });
+
+      let accuracy = network
+        .read()
+        .unwrap()
+        .evaluate(mnist_data.test_images.view(), mnist_data.test_labels.view());
+
+      progress_bar.set_message(format!("Accuracy: {:.2}%", accuracy * 100.0));
+
+      progress_bar.inc(1);
+    }
+
+    progress_bar.finish_with_message("Training complete");
+
+    let accuracy = network
+      .read()
+      .unwrap()
+      .evaluate(mnist_data.test_images.view(), mnist_data.test_labels.view());
+
+    println!("Final accuracy: {:.2}%", accuracy * 100.0);
+
+    network
+      .read()
+      .unwrap()
+      .save_weights(&self.output)
+      .context("Failed to save network weights")?;
+
+    println!("Saved weights to {}", self.output.display());
+
+    Ok(())
+  }
+}
+
+#[derive(Debug, Parser)]
+struct Predict {
+  #[clap(short, long)]
+  weights: PathBuf,
+  #[clap(short, long)]
+  image: PathBuf,
+}
+
+impl Predict {
+  fn run(self) -> Result {
+    let network = Network::load_weights(&self.weights.clone())?;
+
+    let image = Self::read_image(self.image)?;
+
+    let prediction = network.forward(image.view());
+
+    println!(
+      "Predicted digit: {}",
+      argmax(&prediction.view().index_axis(Axis(1), 0))
+    );
+
+    Ok(())
+  }
+
+  fn read_image(path: PathBuf) -> Result<Array2<f64>> {
+    let image_data = read(path)?;
+
+    let image: image::ImageBuffer<image::Luma<u8>, Vec<u8>> =
+      image::load_from_memory(&image_data)?.to_luma8();
+
+    let (width, height) = image.dimensions();
+
+    if width != 28 || height != 28 {
+      bail!("Image must be 28x28 pixels");
+    }
+
+    let flat_image: Vec<f64> = image
+      .into_raw()
+      .into_iter()
+      .map(|p| p as f64 / 255.0)
+      .collect();
+
+    Ok(Array2::from_shape_vec((1, 784), flat_image)?)
   }
 }
 
@@ -261,7 +373,7 @@ impl Network {
       / inputs.nrows() as f64
   }
 
-  fn save_weights(&self, path: &PathBuf) -> Result<()> {
+  fn save_weights(&self, path: &PathBuf) -> Result {
     let serializable_config = self.config.to_serializable();
 
     let file = File::create(path).context("Failed to create weights file")?;
@@ -282,12 +394,6 @@ impl Network {
     let config = NetworkConfig::from_serializable(serializable_config)?;
 
     Ok(Self::new(config))
-  }
-
-  fn predict(&self, input: ArrayView2<f64>) -> Array2<f64> {
-    let hidden = self.config.weight_input_hidden.dot(&input.t()).mapv(relu);
-    let output = self.config.weight_hidden_output.dot(&hidden).mapv(sigmoid);
-    output
   }
 }
 
@@ -322,110 +428,7 @@ where
     .unwrap()
 }
 
-fn train(epochs: usize, batch_size: usize, output: PathBuf) -> Result<()> {
-  let mnist_data =
-    Dataset::load("data").context("Failed to load MNIST dataset")?;
-
-  println!("Dataset loaded successfully:");
-  println!("  Training images: {}", mnist_data.training_images.nrows());
-  println!("  Training labels: {}", mnist_data.training_labels.nrows());
-  println!("  Test images: {}", mnist_data.test_images.nrows());
-  println!("  Test labels: {}", mnist_data.test_labels.nrows());
-
-  let network = Arc::new(RwLock::new(Network::new(NetworkConfig::default())));
-
-  let mut indices: Vec<usize> =
-    (0..mnist_data.training_images.nrows()).collect();
-
-  let progress_bar = ProgressBar::new(epochs as u64);
-
-  progress_bar.set_style(
-    ProgressStyle::default_bar()
-      .template(
-        "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} Epochs {msg}",
-      )?
-      .progress_chars("=>-"),
-  );
-
-  for _ in 0..epochs {
-    indices.shuffle(&mut rand::thread_rng());
-
-    indices.par_chunks(batch_size).for_each(|batch| {
-      let batch_inputs = mnist_data.training_images.select(Axis(0), batch);
-
-      let batch_targets = mnist_data.training_labels.select(Axis(0), batch);
-
-      network
-        .write()
-        .unwrap()
-        .train_batch((&batch_inputs).into(), (&batch_targets).into());
-    });
-
-    let accuracy = network
-      .read()
-      .unwrap()
-      .evaluate(mnist_data.test_images.view(), mnist_data.test_labels.view());
-
-    progress_bar.set_message(format!("Accuracy: {:.2}%", accuracy * 100.0));
-
-    progress_bar.inc(1);
-  }
-
-  progress_bar.finish_with_message("Training complete");
-
-  let accuracy = network
-    .read()
-    .unwrap()
-    .evaluate(mnist_data.test_images.view(), mnist_data.test_labels.view());
-
-  println!("Final accuracy: {:.2}%", accuracy * 100.0);
-
-  network
-    .read()
-    .unwrap()
-    .save_weights(&output)
-    .context("Failed to save network weights")?;
-
-  println!("Saved weights to {}", output.display());
-
-  Ok(())
-}
-
-fn predict(weights: PathBuf, image_path: PathBuf) -> Result<()> {
-  let network = Network::load_weights(&weights.clone())?;
-
-  let image = read_image(image_path)?;
-
-  let prediction = network.predict(image.view());
-
-  println!(
-    "Predicted digit: {}",
-    argmax(&prediction.view().index_axis(Axis(1), 0))
-  );
-
-  Ok(())
-}
-
-fn read_image(path: PathBuf) -> Result<Array2<f64>> {
-  let image_data = read(path)?;
-
-  let image: image::ImageBuffer<image::Luma<u8>, Vec<u8>> =
-    image::load_from_memory(&image_data)?.to_luma8();
-
-  let (width, height) = image.dimensions();
-
-  if width != 28 || height != 28 {
-    bail!("Image must be 28x28 pixels");
-  }
-
-  let flat_image: Vec<f64> = image
-    .into_raw()
-    .into_iter()
-    .map(|p| p as f64 / 255.0)
-    .collect();
-
-  Ok(Array2::from_shape_vec((1, 784), flat_image)?)
-}
+type Result<T = (), E = anyhow::Error> = std::result::Result<T, E>;
 
 fn main() {
   if let Err(error) = Arguments::parse().run() {
