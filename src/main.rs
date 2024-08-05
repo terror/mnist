@@ -2,9 +2,7 @@ use {
   anyhow::{bail, Context},
   clap::Parser,
   indicatif::{ProgressBar, ProgressStyle},
-  ndarray::{Array, Array2, ArrayView, ArrayView2, Axis},
-  ndarray_rand::rand_distr::Uniform,
-  ndarray_rand::RandomExt,
+  ndarray::{Array2, ArrayView, ArrayView2, Axis},
   rand::seq::SliceRandom,
   rayon::prelude::*,
   serde::{Deserialize, Serialize},
@@ -160,7 +158,7 @@ impl Predict {
     let (width, height) = image.dimensions();
 
     if width != 28 || height != 28 {
-      bail!("Image must be 28x28 pixels");
+      bail!("image must be 28x28 pixels");
     }
 
     let flat_image: Vec<f64> = image
@@ -270,15 +268,15 @@ struct SerializableNetworkConfig {
   hidden_output_shape: (usize, usize),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Default)]
 struct NetworkConfig {
   learning_rate: f64,
   weight_input_hidden: Array2<f64>,
   weight_hidden_output: Array2<f64>,
 }
 
-impl NetworkConfig {
-  fn to_serializable(&self) -> SerializableNetworkConfig {
+impl Into<SerializableNetworkConfig> for NetworkConfig {
+  fn into(self) -> SerializableNetworkConfig {
     SerializableNetworkConfig {
       learning_rate: self.learning_rate,
       weight_input_hidden: self
@@ -295,8 +293,12 @@ impl NetworkConfig {
       hidden_output_shape: self.weight_hidden_output.dim(),
     }
   }
+}
 
-  fn from_serializable(config: SerializableNetworkConfig) -> Result<Self> {
+impl TryFrom<SerializableNetworkConfig> for NetworkConfig {
+  type Error = anyhow::Error;
+
+  fn try_from(config: SerializableNetworkConfig) -> Result<Self> {
     Ok(Self {
       learning_rate: config.learning_rate,
       weight_input_hidden: Array2::from_shape_vec(
@@ -311,17 +313,7 @@ impl NetworkConfig {
   }
 }
 
-impl Default for NetworkConfig {
-  fn default() -> Self {
-    Self {
-      learning_rate: 0.1,
-      weight_input_hidden: Array::random((128, 784), Uniform::new(-0.1, 0.1)),
-      weight_hidden_output: Array::random((10, 128), Uniform::new(-0.1, 0.1)),
-    }
-  }
-}
-
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Network {
   config: NetworkConfig,
 }
@@ -374,7 +366,8 @@ impl Network {
   }
 
   fn save_weights(&self, path: &PathBuf) -> Result {
-    let serializable_config = self.config.to_serializable();
+    let serializable_config: SerializableNetworkConfig =
+      self.config.clone().into();
 
     let file = File::create(path).context("Failed to create weights file")?;
 
@@ -391,7 +384,7 @@ impl Network {
       serde_json::from_reader(file)
         .context("Failed to deserialize network weights")?;
 
-    let config = NetworkConfig::from_serializable(serializable_config)?;
+    let config = NetworkConfig::try_from(serializable_config)?;
 
     Ok(Self::new(config))
   }
@@ -440,7 +433,11 @@ fn main() {
 #[cfg(test)]
 mod tests {
   use {
-    super::*, approx::assert_relative_eq, ndarray::array, tempdir::TempDir,
+    super::*,
+    approx::assert_relative_eq,
+    ndarray::{array, Array},
+    ndarray_rand::{rand_distr::Uniform, RandomExt},
+    tempdir::TempDir,
   };
 
   fn compare_arrays_with_tolerance(

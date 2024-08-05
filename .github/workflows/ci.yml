@@ -23,7 +23,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Download actionlint
         id: actionlint
@@ -34,13 +34,12 @@ jobs:
         run: ${{ steps.actionlint.outputs.executable }} -color
 
       - name: Install rust toolchain components
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-          override: true
           toolchain: stable
 
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
 
       - name: Info
         run: |
@@ -65,7 +64,7 @@ jobs:
         run: cargo build
 
       - name: Lockfile
-        run: cargo update --locked --package {package}
+        run: cargo update --locked --package nn
 
       - name: Lint
         run: cargo clippy --all-targets --all-features
