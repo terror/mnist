@@ -1,10 +1,14 @@
 use {
   crate::{
-    arguments::Arguments, config::*, dataset::Dataset, math::*,
-    network::Network, subcommand::Subcommand,
+    app::App as Interface, arguments::Arguments, config::*, dataset::Dataset,
+    math::*, network::Network, subcommand::Subcommand,
   },
   anyhow::{bail, Context},
   clap::Parser,
+  eframe::{
+    egui::{self, *},
+    HardwareAcceleration, NativeOptions,
+  },
   indicatif::{ProgressBar, ProgressStyle},
   ndarray::{Array2, ArrayView, ArrayView2, Axis},
   ndarray_rand::{rand_distr::Uniform, RandomExt},
@@ -21,6 +25,7 @@ use {
   },
 };
 
+mod app;
 mod arguments;
 mod config;
 mod dataset;

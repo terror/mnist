@@ -3,6 +3,9 @@ default:
 
 all: build test clippy fmt-check
 
+app:
+  cargo run app --weights weights.json
+
 build:
   cargo build
 
