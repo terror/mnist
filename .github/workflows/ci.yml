@@ -64,7 +64,7 @@ jobs:
         run: cargo build
 
       - name: Lockfile
-        run: cargo update --locked --package nn
+        run: cargo update --locked --package mnist
 
       - name: Lint
         run: cargo clippy --all-targets --all-features

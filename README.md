@@ -1,8 +1,8 @@
-## nn
+## mnist
 
-[![CI](https://github.com/terror/nn/actions/workflows/ci.yml/badge.svg)](https://github.com/terror/nn/actions/workflows/ci.yml)
+[![CI](https://github.com/terror/mnist/actions/workflows/ci.yml/badge.svg)](https://github.com/terror/mnist/actions/workflows/ci.yml)
 
-**nn** is a neural network written from scratch with the goal of being able to
+**mnist** is a neural network written from scratch with the goal of being able to
 recognize handwritten digits, written in pure Rust with minimal dependencies
 used in the training process.
 
@@ -13,7 +13,7 @@ used in the training process.
 Train the model and make predictions using saved weights.
 
 ```
-Usage: nn <COMMAND>
+Usage: mnist <COMMAND>
 
 Commands:
   train
@@ -36,7 +36,8 @@ Dataset loaded successfully:
   Training labels: 60000
   Test images: 10000
   Test labels: 10000
-[01:24:29] ======================================== 100/100 Epochs Training complete                                                                                                                   Final accuracy: 97.16%
+[01:24:29] ======================================== 100/100 Epochs Training complete
+Final accuracy: 97.16%
 Saved weights to weights.json
 ```
 
