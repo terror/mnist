@@ -27,7 +27,7 @@ Options:
 ### Training
 
 Below are the results from training on the standard MNIST dataset. This used a
-learning rate of `0.1`, a batch size of `128`, and trained for `50` epochs. These
+learning rate of `0.1`, a batch size of `128`, and trained for `100` epochs. These
 values are configurable via the `train` subcommand.
 
 ```
@@ -36,8 +36,7 @@ Dataset loaded successfully:
   Training labels: 60000
   Test images: 10000
   Test labels: 10000
-[00:53:14] ======================================== 50/50 Epochs Training complete
-Final accuracy: 96.45%
+[01:24:29] ======================================== 100/100 Epochs Training complete                                                                                                                   Final accuracy: 97.16%
 Saved weights to weights.json
 ```
 
