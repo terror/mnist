@@ -6,8 +6,11 @@ mod train;
 
 #[derive(Debug, Parser)]
 pub(crate) enum Subcommand {
+  #[clap(name = "app", about = "Run an interactive GUI application")]
   App(App),
+  #[clap(name = "predict", about = "Predict the class of a new instance")]
   Predict(Predict),
+  #[clap(name = "train", about = "Train the model")]
   Train(Train),
 }
 

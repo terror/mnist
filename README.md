@@ -18,8 +18,9 @@ Train the model and make predictions using saved weights.
 Usage: mnist <COMMAND>
 
 Commands:
-  train
-  predict
+  app      Run an interactive GUI application
+  predict  Predict the class of a new instance
+  train    Train the model
   help     Print this message or the help of the given subcommand(s)
 
 Options:
