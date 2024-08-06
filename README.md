@@ -6,7 +6,9 @@
 recognize handwritten digits, written in pure Rust with minimal dependencies
 used in the training process.
 
-<img width="1667" alt="Screenshot 2024-08-05 at 2 42 44 PM" src="https://github.com/user-attachments/assets/341a5bc9-383b-4186-84e5-fc579945555b">
+<div align="center">
+  <img width="562" alt="Screenshot 2024-08-06 at 1 38 16 PM" src="https://github.com/user-attachments/assets/15c150e5-6e82-467b-8d19-b3176bc21e4e">
+</div>
 
 ### Usage
 
@@ -49,6 +51,17 @@ predictions on new data.
 ```bash
 cargo run -- predict --weights weights.json --image samples/2.png
 ```
+
+### Live drawing
+
+You can spawn a GUI app for live drawing/inference using the CLI as well:
+
+```
+cargo run -- app --weights weights.json
+```
+
+The app is built using [`egui`](https://www.egui.rs/) and re-uses a neural net
+with stored weights for making live predictions.
 
 ### Prior Art
 
